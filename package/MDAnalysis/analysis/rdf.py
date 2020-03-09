@@ -111,6 +111,22 @@ solvent with itself or with another solute.
       the raw counts, for all :attr:`bins`.
 
 
+Average radial distribution function in x-y
+-------------------------------------------
+
+:class:`InterRDF_xy` is a tool to calculate average radial distribution functions
+between two groups of atoms in x-y. Suppose we have two AtomGroups ``A`` and
+``B``. ``A`` contains atom ``A1``, ``A2``, and ``B`` contains ``B1``,
+``B2``. Give ``A`` and ``B`` to class:`InterRDF_xy`, the output will be the
+average of RDFs between ``A1`` and ``B1``, ``A1`` and ``B2``, ``A2`` and
+``B1``, ``A2`` and ``B2``. A typical application is to calculate the RDF of
+solvent with itself or with another solute.
+
+.. autoclass:: InterRDF_xy
+   :members:
+   :inherited-members:
+
+
 Site-specific radial distribution function
 ------------------------------------------
 
@@ -294,6 +310,125 @@ class InterRDF(AnalysisBase):
         # Volume in each radial shell
         vol = np.power(self.edges[1:], 3) - np.power(self.edges[:-1], 3)
         vol *= 4/3.0 * np.pi
+
+        # Average number density
+        box_vol = self.volume / self.n_frames
+        density = N / box_vol
+
+        rdf = self.count / (density * vol * self.n_frames)
+
+        self.rdf = rdf
+
+
+class InterRDF_xy(AnalysisBase):
+    """Intermolecular pair distribution function in x-y
+
+    InterRDF_xy(g1, g2, nbins=75, range=(0.0, 15.0))
+
+    Arguments
+    ---------
+    g1 : AtomGroup
+      First AtomGroup
+    g2 : AtomGroup
+      Second AtomGroup
+    nbins : int (optional)
+          Number of bins in the histogram [75]
+    range : tuple or list (optional)
+          The size of the RDF [0.0, 15.0]
+    exclusion_block : tuple (optional)
+          A tuple representing the tile to exclude from the distance
+          array. [None]
+    verbose : bool (optional)
+          Show detailed progress of the calculation if set to ``True``; the
+          default is ``False``.
+
+
+    Example
+    -------
+    First create the :class:`InterRDF_xy` object, by supplying two
+    AtomGroups then use the :meth:`run` method ::
+
+      rdf = InterRDF_xy(ag1, ag2)
+      rdf.run()
+
+    Results are available through the :attr:`bins` and :attr:`rdf`
+    attributes::
+
+      plt.plot(rdf.bins, rdf.rdf)
+
+    The `exclusion_block` keyword allows the masking of pairs from
+    within the same molecule.  For example, if there are 7 of each
+    atom in each molecule, the exclusion mask `(7, 7)` can be used.
+
+
+    .. versionadded:: 0.13.0
+
+    .. versionchanged:: 1.0.0
+       Support for the ``start``, ``stop``, and ``step`` keywords has been
+       removed. These should instead be passed to :meth:`InterRDF.run`.
+
+    """
+    def __init__(self, g1, g2,
+                 nbins=75, range=(0.0, 15.0), exclusion_block=None,
+                 **kwargs):
+        super(InterRDF, self).__init__(g1.universe.trajectory, **kwargs)
+        self.g1 = g1
+        self.g2 = g2
+        self.g1.positions[:,2] = 0
+        self.g2.positions[:,2] = 0
+        self.u = g1.universe
+
+        self.rdf_settings = {'bins': nbins,
+                             'range': range}
+        self._exclusion_block = exclusion_block
+
+    def _prepare(self):
+        # Empty histogram to store the RDF
+        count, edges = np.histogram([-1], **self.rdf_settings)
+        count = count.astype(np.float64)
+        count *= 0.0
+        self.count = count
+        self.edges = edges
+        self.bins = 0.5 * (edges[:-1] + edges[1:])
+
+        # Need to know average volume
+        self.volume = 0.0
+        # Set the max range to filter the search radius
+        self._maxrange = self.rdf_settings['range'][1]
+
+
+    def _single_frame(self):
+        pairs, dist = distances.capped_distance(self.g1.positions,
+                                                self.g2.positions,
+                                                self._maxrange,
+                                                box=self.u.dimensions)
+        # Maybe exclude same molecule distances
+        if self._exclusion_block is not None:
+            idxA, idxB = pairs[:, 0]//self._exclusion_block[0], pairs[:, 1]//self._exclusion_block[1]
+            mask = np.where(idxA != idxB)[0]
+            dist = dist[mask]
+
+
+        count = np.histogram(dist, **self.rdf_settings)[0]
+        self.count += count
+
+        self.volume += self._ts.volume/self._ts.dimensions[2] # assumes z is normal to x-y
+
+    def _conclude(self):
+        # Number of each selection
+        nA = len(self.g1)
+        nB = len(self.g2)
+        N = nA * nB
+
+        # If we had exclusions, take these into account
+        if self._exclusion_block:
+            xA, xB = self._exclusion_block
+            nblocks = nA / xA
+            N -= xA * xB * nblocks
+
+        # Area in each radial shell
+        vol = np.power(self.edges[1:], 2) - np.power(self.edges[:-1], 2)
+        vol *= np.pi
 
         # Average number density
         box_vol = self.volume / self.n_frames
