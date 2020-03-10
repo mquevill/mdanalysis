@@ -365,17 +365,15 @@ class InterRDF_xy(AnalysisBase):
 
     .. versionchanged:: 1.0.0
        Support for the ``start``, ``stop``, and ``step`` keywords has been
-       removed. These should instead be passed to :meth:`InterRDF.run`.
+       removed. These should instead be passed to :meth:`InterRDF_xy.run`.
 
     """
     def __init__(self, g1, g2,
                  nbins=75, range=(0.0, 15.0), exclusion_block=None,
                  **kwargs):
-        super(InterRDF, self).__init__(g1.universe.trajectory, **kwargs)
+        super(InterRDF_xy, self).__init__(g1.universe.trajectory, **kwargs)
         self.g1 = g1
         self.g2 = g2
-        self.g1.positions[:,2] = 0
-        self.g2.positions[:,2] = 0
         self.u = g1.universe
 
         self.rdf_settings = {'bins': nbins,
